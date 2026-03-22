@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lulynx SubHub 初始化</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body data-page="setup">
+    <div class="bg-layer"></div>
+    <main class="auth-shell">
+      <section class="card auth-card setup-card">
+        <p class="eyebrow">Lulynx SubHub</p>
+        <h1>安装向导</h1>
+        <p class="hero-copy">
+          这是第一次启动。初始化完成后，面板会开始为你统一管理多个机场订阅，并使用你选定的基础策略启动。
+        </p>
+        <section id="notice" class="notice" hidden></section>
+        <form id="setup-form" class="stack-form">
+          <div class="section-panel-block">
+            <div>
+              <p class="eyebrow">Admin</p>
+              <h3>管理员账号</h3>
+            </div>
+            <div class="field-grid">
+              <label>
+                <span>用户名</span>
+                <input id="setup-username" name="username" type="text" autocomplete="username" required>
+              </label>
+              <label>
+                <span>密码</span>
+                <input id="setup-password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+              </label>
+            </div>
+          </div>
+
+          <div class="section-panel-block">
+            <div>
+              <p class="eyebrow">Panel</p>
+              <h3>基础面板设置</h3>
+            </div>
+            <div class="field-grid">
+              <label>
+                <span>监听端口</span>
+                <input name="panel_port" type="number" min="1" max="65535" value="8787">
+              </label>
+              <label>
+                <span>默认主题</span>
+                <select name="theme">
+                  <option value="classic">暖色经典</option>
+                  <option value="industrial-light">工业中控</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div class="section-panel-block">
+            <div>
+              <p class="eyebrow">Filters</p>
+              <h3>默认过滤规则</h3>
+            </div>
+            <label>
+              <span>全局剔除关键词</span>
+              <textarea name="exclude_keywords" rows="5" placeholder="例如：试用、流量包、到期"></textarea>
+            </label>
+            <div class="field-grid">
+              <label>
+                <span>全局排除协议</span>
+                <input name="exclude_protocols" type="text" placeholder="例如：ssr, vmess">
+              </label>
+              <label>
+                <span>去重策略</span>
+                <select name="dedup_strategy">
+                  <option value="uri">按 URI 去重</option>
+                  <option value="name_protocol">按 名称+协议 去重</option>
+                  <option value="name">按名称去重</option>
+                </select>
+              </label>
+            </div>
+            <label>
+              <span>节点重命名规则</span>
+              <textarea name="rename_rules" rows="4" placeholder="每行一条，格式：香港 => HK"></textarea>
+            </label>
+          </div>
+
+          <div class="section-panel-block">
+            <div>
+              <p class="eyebrow">Cleanup</p>
+              <h3>自动清理策略</h3>
+            </div>
+            <label class="checkbox-item">
+              <input name="auto_disable_expired" type="checkbox">
+              <span>
+                <strong>自动禁用已到期订阅</strong>
+                <small>初始化后后台轮询会自动暂停已到期且仍启用的订阅。</small>
+              </span>
+            </label>
+            <label>
+              <span>连续失败自动暂停阈值</span>
+              <input name="pause_failures_threshold" type="number" min="0" max="20" value="0">
+            </label>
+            <p class="muted">填 0 表示关闭。建议先用默认值跑起来，后续可以在设置页继续细调。</p>
+          </div>
+
+          <button class="button button-primary" type="submit">完成初始化</button>
+        </form>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

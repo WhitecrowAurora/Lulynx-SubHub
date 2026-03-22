@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lulynx SubHub 登录</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body data-page="login">
+    <div class="bg-layer"></div>
+    <main class="auth-shell">
+      <section class="card auth-card">
+        <p class="eyebrow">Lulynx SubHub</p>
+        <h1>登录管理面板</h1>
+        <p class="hero-copy">登录后就能集中管理多个机场订阅、自动更新和合并输出。</p>
+        <section id="notice" class="notice" hidden></section>
+        <form id="login-form" class="stack-form">
+          <label>
+            <span>用户名</span>
+            <input id="login-username" name="username" type="text" autocomplete="username" required>
+          </label>
+          <label>
+            <span>密码</span>
+            <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+          </label>
+          <button class="button button-primary" type="submit">登录</button>
+        </form>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

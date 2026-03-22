@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lulynx SubHub</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body data-page="dashboard">
+    <div class="app-background"></div>
+    <div class="dashboard-layout">
+      <aside id="sidebar-shell" class="sidebar card"></aside>
+
+      <main class="workspace">
+        <header id="topbar-shell" class="topbar card"></header>
+
+        <section id="notice" class="notice" hidden></section>
+
+        <section id="content-shell" class="content-shell">
+          <section class="view-panel" id="overview-view"></section>
+          <section class="view-panel" id="subscriptions-view" hidden></section>
+          <section class="view-panel" id="groups-view" hidden></section>
+          <section class="view-panel" id="profiles-view" hidden></section>
+          <section class="view-panel" id="nodes-view" hidden></section>
+          <section class="view-panel" id="settings-view" hidden></section>
+        </section>
+
+        <footer id="statusbar-shell" class="statusbar card"></footer>
+      </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

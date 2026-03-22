@@ -1,0 +1,3 @@
+日本主力,https://example-jp.com/sub?token=demo-jp
+香港低倍率,https://example-hk.com/sub?token=demo-hk
+自用备用,https://example-backup.com/sub?token=demo-backup
