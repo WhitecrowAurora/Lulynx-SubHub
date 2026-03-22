@@ -1,26 +1,35 @@
 # Lulynx SubHub
 
-Lulynx SubHub is a self-hosted proxy subscription hub for aggregating, refreshing, filtering, and exporting multiple subscription sources from one web panel.
+Lulynx SubHub 是一个自托管的代理订阅聚合面板，用来集中管理多个远程订阅、本地手动节点和多个主订阅输出。
 
-It is designed for people who need to manage several remote subscriptions, local manual nodes, and multiple merged outputs for phones, routers, and different clients without relying on cron jobs or extra runtime dependencies.
+它适合这类场景：
 
-## Highlights
+- 手里有多个机场订阅，需要统一管理
+- 想按设备、地区、用途拆分多个主订阅
+- 想自动刷新、过滤、去重、重命名节点
+- 想把最终结果导出成 Base64、Clash、Surge、sing-box 等格式
+- 想要一个不依赖额外运行时依赖、直接用 Python 标准库就能跑起来的面板
 
-- Self-hosted web panel with initial setup wizard and admin login
-- Manage multiple remote subscriptions and local manual node lists
-- Auto refresh with in-process countdown scheduler instead of cron
-- Preview subscriptions before saving and inspect parsed nodes
-- Group subscriptions, edit expiry dates, pause, delete, or bulk import
-- Build multiple merge profiles with independent source selection and filters
-- Prioritize selected sources so their nodes appear first in merged output
-- Global and profile-level filtering for keywords and protocols
-- Rename rules and dedup strategies for cleaner merged results
-- Export merged outputs as Base64, plain text, JSON, Clash / Mihomo, Surge, and sing-box
-- Access statistics, refresh logs, health alerts, Telegram / Webhook notifications
-- Backup / restore, restore preview, install wizard, and schema migration support
-- Stdlib-only Python backend with SQLite storage
+## 主要特性
 
-## Supported Protocols
+- 首次启动自带 Web 初始化向导
+- 管理多个远程订阅链接
+- 支持本地手动节点，一行一个 URI
+- 订阅支持分组、到期时间、禁用、删除、手动刷新
+- 添加前可预检订阅，先查看解析结果
+- 内置倒计时轮询刷新，不依赖 `cron`
+- 支持创建多个主订阅
+- 主订阅可选择特定来源，或合并全部启用订阅
+- 支持将指定来源在主订阅结果中置顶
+- 支持关键词过滤、协议排除、去重策略和节点重命名规则
+- 支持节点预览、搜索、协议筛选
+- 支持刷新日志、访问统计、订阅健康提醒
+- 支持 Telegram / Webhook 通知
+- 支持备份导出、恢复预检和一键恢复
+- 支持数据库迁移命令
+- 提供 Linux 一键安装脚本
+
+## 支持协议
 
 - `ss`
 - `ssr`
@@ -31,105 +40,104 @@ It is designed for people who need to manage several remote subscriptions, local
 - `hysteria2`
 - `anytls`
 
-## Screens and Workflow
+## 一键安装
 
-Lulynx SubHub is built around four core workflows:
+如果你想直接从 GitHub 安装，可以执行：
 
-1. Add remote subscriptions or local manual nodes.
-2. Preview, refresh, filter, and organize them by group and expiry date.
-3. Create one or more merge profiles for different devices or use cases.
-4. Subscribe to the merged output URL in your client of choice.
-
-The panel also tracks refresh history, node changes, health warnings, and merged subscription access counts.
-
-## Project Structure
-
-```text
-app.py              HTTP server entrypoint
-manager.py          SQLite storage, refresh scheduler, merge logic
-parsers.py          Subscription decoding and node parsing
-exporters.py        Output builders for Base64 / plain / JSON / Clash / Surge / sing-box
-static/             Dashboard, setup, login, and frontend assets
-examples/           Bulk import and filter rule examples
-tests/              Unit tests
+```bash
+curl -fsSL https://raw.githubusercontent.com/WhitecrowAurora/Lulynx-SubHub/main/install.sh | bash
 ```
 
-## Requirements
+上面这条命令默认会：
 
-- Python 3.10+
+- 从 GitHub 下载 `main` 分支源码
+- 安装到 `/opt/lulynx-subhub`
+- 数据目录放到 `/var/lib/lulynx-subhub`
+- 创建 `lulynx-subhub` systemd 服务
+- 默认监听 `127.0.0.1:8787`
 
-No third-party runtime dependencies are required.
+如果你希望直接从公网访问，而不是先走 Nginx 反代，可以这样：
 
-## Quick Start
+```bash
+curl -fsSL https://raw.githubusercontent.com/WhitecrowAurora/Lulynx-SubHub/main/install.sh | bash -s -- --bind-host 0.0.0.0 --port 8787
+```
+
+如果你已经把仓库克隆到本地，也可以直接在仓库目录执行：
+
+```bash
+bash install.sh
+```
+
+安装脚本支持这些常用参数：
+
+- `--install-dir DIR` 自定义安装目录
+- `--data-dir DIR` 自定义数据目录
+- `--service-name NAME` 自定义 systemd 服务名
+- `--service-user USER` 自定义服务运行用户
+- `--bind-host HOST` 自定义监听地址
+- `--port PORT` 自定义端口
+- `--db-name NAME` 自定义数据库文件名
+- `--ref REF` 指定安装的 GitHub 分支 / 标签 / 提交
+- `--no-systemd` 不创建 systemd，只复制文件并输出手动启动命令
+- `--skip-start` 创建服务但不立即启动
+
+## 首次初始化
+
+安装完成后，首次访问面板会自动进入初始化向导。
+
+初始化向导目前支持一次性设置：
+
+- 管理员用户名和密码
+- 面板监听端口
+- 默认主题
+- 全局过滤关键词
+- 全局排除协议
+- 去重策略
+- 节点重命名规则
+- 自动清理策略
+
+如果安装脚本使用默认监听 `127.0.0.1`，你可以：
+
+- 先通过 Nginx 反代到域名，再访问 `https://你的域名/setup`
+- 或在服务器本机访问 `http://127.0.0.1:8787/setup`
+
+## 手动运行
+
+不使用一键安装脚本时，也可以直接运行：
 
 ```bash
 python app.py --host 0.0.0.0 --port 8787 --db data/subpanel.db
 ```
 
-Then open:
+默认情况下：
 
-```text
-http://127.0.0.1:8787
-```
+- 监听地址：`127.0.0.1`
+- 端口：优先使用面板设置中保存的端口，默认 `8787`
+- 数据库：`data/subpanel.db`
 
-On first launch, the setup wizard lets you configure:
+## 反向代理说明
 
-- admin username and password
-- panel port
-- default theme
-- global exclude keywords
-- excluded protocols
-- dedup strategy
-- rename rules
-- cleanup strategy
+推荐把 Lulynx SubHub 挂在域名根路径上，例如：
 
-## Main Features
+- `https://sub.example.com/`
 
-### Subscription Sources
+当前前端不支持部署到子路径，例如：
 
-- Add remote subscription URLs
-- Add local manual nodes, one URI per line
-- Edit source URL, name, group, expiry date, and refresh interval
-- Enable, disable, refresh, or delete sources
-- Bulk import sources with `name,url` or `name<TAB>url`
-- Preview subscriptions before saving
+- `https://example.com/sub/`
 
-### Merge Profiles
+如果使用 Nginx 反代，请保留这些请求头：
 
-- Create multiple merged outputs
-- Select specific sources for each profile
-- Use all enabled sources or only chosen ones
-- Prioritize selected sources so they stay at the top of merged results
-- Apply per-profile keyword and protocol exclusions
-- Clone profiles and regenerate public tokens
+- `Host`
+- `X-Forwarded-Host`
+- `X-Forwarded-Proto`
+- `X-Forwarded-For`
+- `X-Real-IP`
 
-### Filtering and Cleanup
+这样面板生成出来的公开订阅链接才会带上正确的域名和协议。
 
-- Global keyword filtering
-- Global protocol exclusion
-- Dedup by URI, name + protocol, or name
-- Rename rules in `pattern => replacement` format
-- Auto disable expired subscriptions
-- Auto pause subscriptions after repeated failures
+## 导出格式
 
-### Observability
-
-- Dashboard stats and health alerts
-- Refresh logs with status, duration, before/after counts, and sample diffs
-- Node preview with search and protocol filters
-- Access counters for merged subscription links
-- Telegram and Webhook notifications
-
-### Data Safety
-
-- Full backup export
-- Restore preview before replacing current data
-- Database schema migration command
-- Backend admin reset command for recovery
-
-## Export Formats
-
-Each merge profile exposes public URLs such as:
+每个主订阅都支持以下公开导出地址：
 
 ```text
 /subscribe/<token>
@@ -140,60 +148,78 @@ Each merge profile exposes public URLs such as:
 /subscribe/<token>?format=singbox
 ```
 
-Available formats:
+对应格式如下：
 
-- `base64` for typical subscription clients
-- `plain` for debugging raw merged URIs
-- `json` for inspection or scripting
-- `clash` for Clash / Mihomo proxy lists
-- `surge` for Surge `[Proxy]` fragments
-- `singbox` for sing-box `outbounds` JSON
+- `base64`：常见客户端订阅
+- `plain`：便于排查的原始节点文本
+- `json`：调试和脚本处理
+- `clash`：Clash / Mihomo 代理列表
+- `surge`：Surge `[Proxy]` 配置片段
+- `singbox`：sing-box `outbounds` JSON
 
-## Reverse Proxy Notes
+## 常用命令
 
-Lulynx SubHub is intended to run behind a reverse proxy on the domain root, for example:
-
-- `https://sub.example.com/`
-
-Subpath deployments such as `https://example.com/sub/` are not supported by the current frontend routing.
-
-When using Nginx, keep `Host`, `X-Forwarded-Host`, and `X-Forwarded-Proto` headers so the panel can generate correct public subscription URLs.
-
-## CLI Commands
-
-Reset admin credentials:
+重置管理员账号：
 
 ```bash
 python app.py --reset-admin
 python app.py --reset-admin --admin-username admin --admin-password new-password-123
 ```
 
-Run database migrations:
+执行数据库迁移：
 
 ```bash
 python app.py --migrate-db --db data/subpanel.db
 ```
 
-## Development
+如果你是通过一键安装脚本部署的，常用 systemd 命令通常是：
 
-Run tests:
+```bash
+systemctl status lulynx-subhub
+journalctl -u lulynx-subhub -f
+```
+
+## 目录结构
+
+```text
+install.sh           Linux 一键安装脚本
+app.py               HTTP 服务入口
+manager.py           SQLite、刷新调度和聚合逻辑
+parsers.py           订阅解码与节点解析
+exporters.py         多格式导出逻辑
+static/              面板页面与前端资源
+examples/            批量导入、过滤规则示例
+tests/               单元测试
+```
+
+## 开发与测试
+
+运行测试：
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-The repository includes example files under [`examples/`](./examples) for:
+仓库内附带这些示例文件：
 
-- bulk import
-- global filters
-- rename rules
+- `examples/bulk-import.txt`
+- `examples/global-filters.txt`
+- `examples/rename-rules.txt`
 
-## Security and Publishing Notes
+## 安全说明
 
-- Do not commit `data/` or any generated SQLite database
-- Do not publish live subscription URLs, tokens, webhook URLs, or notification credentials
-- Backups intentionally exclude the runtime `session_secret`
+- 不要把 `data/`、SQLite 数据库、备份文件提交到仓库
+- 不要公开真实订阅 URL、Token、Webhook 地址、通知密钥
+- 备份不会导出运行时 `session_secret`
+- 如果你直接暴露公网，请尽快完成首次初始化并设置强密码
 
-## License
+## 已知限制
 
-This project is licensed under the GNU Affero General Public License v3.0.
+- `Clash / Mihomo`、`Surge`、`sing-box` 导出优先覆盖常见协议和常见参数，不保证所有边缘参数都完全映射
+- `Surge` 导出会跳过当前不兼容的协议
+- 当前只有管理员登录，不包含多用户权限系统
+- 当前前端不支持子路径部署
+
+## 开源协议
+
+本项目基于 `GNU Affero General Public License v3.0` 开源。
