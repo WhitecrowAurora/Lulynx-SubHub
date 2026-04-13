@@ -17,7 +17,7 @@ from urllib.request import Request, urlopen
 from exporters import SUPPORTED_EXPORT_FORMATS, build_export
 from parsers import SUPPORTED_PROTOCOLS, NodeEntry, filter_nodes, parse_subscription_payload, split_keywords
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 
 def utc_now() -> datetime:
@@ -139,6 +139,7 @@ class SubscriptionManager:
                     uri TEXT NOT NULL,
                     name TEXT NOT NULL,
                     protocol TEXT NOT NULL,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     UNIQUE(subscription_id, uri)
                 );
@@ -209,6 +210,7 @@ class SubscriptionManager:
         profile_columns = self._table_columns("merge_profiles")
         group_columns = self._table_columns("subscription_groups")
         profile_source_columns = self._table_columns("merge_profile_sources")
+        node_columns = self._table_columns("nodes")
 
         with self._database() as connection:
             if "group_id" not in subscription_columns:
@@ -299,6 +301,35 @@ class SubscriptionManager:
                         WHERE profile_id = ? AND subscription_id = ?
                         """,
                         sort_updates,
+                    )
+            if "sort_order" not in node_columns:
+                connection.execute(
+                    "ALTER TABLE nodes ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"
+                )
+                rows = connection.execute(
+                    """
+                    SELECT id, subscription_id
+                    FROM nodes
+                    ORDER BY subscription_id ASC, id ASC
+                    """
+                ).fetchall()
+                node_sort_updates: list[tuple[int, int]] = []
+                current_subscription_id: int | None = None
+                sort_order = 0
+                for row in rows:
+                    if row["subscription_id"] != current_subscription_id:
+                        current_subscription_id = int(row["subscription_id"])
+                        sort_order = 0
+                    node_sort_updates.append((sort_order, int(row["id"])))
+                    sort_order += 1
+                if node_sort_updates:
+                    connection.executemany(
+                        """
+                        UPDATE nodes
+                        SET sort_order = ?
+                        WHERE id = ?
+                        """,
+                        node_sort_updates,
                     )
         self.set_setting("schema_version", str(CURRENT_SCHEMA_VERSION))
 
@@ -1206,14 +1237,26 @@ class SubscriptionManager:
             started_at = now
             node_count_before = int(subscription.get("node_count", 0) or 0)
             previous_uris: set[str] = set()
+            previous_sort_order_by_uri: dict[str, int] = {}
+            next_sort_order = 0
             with self._database() as connection:
-                previous_uris = {
-                    row["uri"]
-                    for row in connection.execute(
-                        "SELECT uri FROM nodes WHERE subscription_id = ?",
-                        (subscription_id,),
-                    ).fetchall()
-                }
+                existing_rows = connection.execute(
+                    """
+                    SELECT uri, sort_order, id
+                    FROM nodes
+                    WHERE subscription_id = ?
+                    ORDER BY sort_order ASC, id ASC
+                    """,
+                    (subscription_id,),
+                ).fetchall()
+                previous_uris = {row["uri"] for row in existing_rows}
+                for row in existing_rows:
+                    uri = row["uri"]
+                    if uri in previous_sort_order_by_uri:
+                        continue
+                    sort_order = int(row["sort_order"] or 0)
+                    previous_sort_order_by_uri[uri] = sort_order
+                    next_sort_order = max(next_sort_order, sort_order + 1)
 
             try:
                 payload = self._load_subscription_payload_bytes(
@@ -1263,6 +1306,27 @@ class SubscriptionManager:
             current_uris = {node.uri for node in result.nodes}
             added_sample = list(current_uris - previous_uris)[:8]
             removed_sample = list(previous_uris - current_uris)[:8]
+            used_sort_orders: set[int] = set()
+            stable_node_rows: list[tuple[int, str, str, str, int, str | None]] = []
+            created_at = to_iso(now)
+            for node in result.nodes:
+                sort_order = previous_sort_order_by_uri.get(node.uri)
+                if sort_order is None or sort_order in used_sort_orders:
+                    while next_sort_order in used_sort_orders:
+                        next_sort_order += 1
+                    sort_order = next_sort_order
+                    next_sort_order += 1
+                used_sort_orders.add(sort_order)
+                stable_node_rows.append(
+                    (
+                        subscription_id,
+                        node.uri,
+                        node.name,
+                        node.protocol,
+                        sort_order,
+                        created_at,
+                    )
+                )
             with self._database() as connection:
                 connection.execute(
                     "DELETE FROM nodes WHERE subscription_id = ?",
@@ -1270,19 +1334,10 @@ class SubscriptionManager:
                 )
                 connection.executemany(
                     """
-                    INSERT INTO nodes (subscription_id, uri, name, protocol, created_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO nodes (subscription_id, uri, name, protocol, sort_order, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    [
-                        (
-                            subscription_id,
-                            node.uri,
-                            node.name,
-                            node.protocol,
-                            to_iso(now),
-                        )
-                        for node in result.nodes
-                    ],
+                    stable_node_rows,
                 )
                 connection.execute(
                     """
@@ -1625,11 +1680,11 @@ class SubscriptionManager:
         with self._database() as connection:
             rows = connection.execute(
                 f"""
-                SELECT n.id AS node_id, n.subscription_id, n.uri, n.name, n.protocol
+                SELECT n.id AS node_id, n.subscription_id, n.uri, n.name, n.protocol, n.sort_order
                 FROM nodes n
                 INNER JOIN subscriptions s ON s.id = n.subscription_id
                 {where_clause}
-                ORDER BY s.id ASC, n.id ASC
+                ORDER BY s.id ASC, n.sort_order ASC, n.id ASC
                 """,
                 params,
             ).fetchall()
@@ -1640,6 +1695,7 @@ class SubscriptionManager:
                 rows,
                 key=lambda row: (
                     source_order.get(int(row["subscription_id"]), len(source_order)),
+                    int(row["sort_order"] or 0),
                     int(row["node_id"]),
                 ),
             )
@@ -2044,9 +2100,9 @@ class SubscriptionManager:
                     _row_to_dict(row)
                     for row in connection.execute(
                         """
-                        SELECT id, subscription_id, uri, name, protocol, created_at
+                        SELECT id, subscription_id, uri, name, protocol, sort_order, created_at
                         FROM nodes
-                        ORDER BY id ASC
+                        ORDER BY subscription_id ASC, sort_order ASC, id ASC
                         """
                     ).fetchall()
                 ],
@@ -2160,8 +2216,8 @@ class SubscriptionManager:
             for node in nodes:
                 connection.execute(
                     """
-                    INSERT INTO nodes (id, subscription_id, uri, name, protocol, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO nodes (id, subscription_id, uri, name, protocol, sort_order, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         int(node["id"]),
@@ -2169,6 +2225,7 @@ class SubscriptionManager:
                         str(node["uri"]),
                         str(node["name"]),
                         str(node["protocol"]),
+                        int(node.get("sort_order", 0)),
                         str(node.get("created_at", to_iso(utc_now()))),
                     ),
                 )

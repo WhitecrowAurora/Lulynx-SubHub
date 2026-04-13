@@ -159,6 +159,222 @@ class ManagerFlowTests(unittest.TestCase):
         self.assertEqual(ordered_profile["selected_subscription_ids"], [second["id"], first["id"]])
         self.assertEqual(ordered_profile["priority_source_count"], 2)
 
+    def test_repeated_refresh_keeps_profile_source_order_stable(self) -> None:
+        payloads = {
+            "https://one.example/sub": base64.b64encode(
+                "\n".join(
+                    [
+                        "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDM=#First-A",
+                        "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDQ=#First-B",
+                    ]
+                ).encode("utf-8")
+            ),
+            "https://two.example/sub": base64.b64encode(
+                "\n".join(
+                    [
+                        "trojan://password@example.net:443?security=tls#Second-A",
+                        "trojan://password@example.net:444?security=tls#Second-B",
+                    ]
+                ).encode("utf-8")
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = FakeSubscriptionManager(Path(temp_dir) / "panel.db", payloads)
+            manager.create_initial_user("admin", "password123")
+            first = manager.add_subscription("one", "https://one.example/sub")
+            second = manager.add_subscription("two", "https://two.example/sub")
+            profile = manager.add_profile(
+                name="Stable Order",
+                mode="selected",
+                subscription_ids=[second["id"], first["id"]],
+            )
+
+            for _ in range(4):
+                manager.refresh_subscription(first["id"], trigger="scheduler")
+                manager.refresh_subscription(second["id"], trigger="scheduler")
+
+            merged_plain = manager.build_merged_subscription(profile["id"], "plain")
+
+        self.assertEqual(
+            merged_plain.splitlines(),
+            [
+                "trojan://password@example.net:443?security=tls#Second-A",
+                "trojan://password@example.net:444?security=tls#Second-B",
+                "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDM=#First-A",
+                "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDQ=#First-B",
+            ],
+        )
+
+    def test_node_sort_order_is_used_for_profile_export(self) -> None:
+        payloads = {
+            "https://ordered.example/sub": base64.b64encode(
+                "\n".join(
+                    [
+                        "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDM=#Alpha",
+                        "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDQ=#Beta",
+                    ]
+                ).encode("utf-8")
+            )
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = FakeSubscriptionManager(Path(temp_dir) / "panel.db", payloads)
+            manager.create_initial_user("admin", "password123")
+            subscription = manager.add_subscription("ordered", "https://ordered.example/sub")
+            profile = manager.add_profile(
+                name="Node Order",
+                mode="selected",
+                subscription_ids=[subscription["id"]],
+            )
+
+            with manager._database() as connection:
+                alpha = connection.execute(
+                    "SELECT id FROM nodes WHERE subscription_id = ? AND name = ?",
+                    (subscription["id"], "Alpha"),
+                ).fetchone()
+                beta = connection.execute(
+                    "SELECT id FROM nodes WHERE subscription_id = ? AND name = ?",
+                    (subscription["id"], "Beta"),
+                ).fetchone()
+                connection.execute("UPDATE nodes SET sort_order = 1 WHERE id = ?", (alpha["id"],))
+                connection.execute("UPDATE nodes SET sort_order = 0 WHERE id = ?", (beta["id"],))
+
+            merged_plain = manager.build_merged_subscription(profile["id"], "plain")
+
+        self.assertEqual(
+            merged_plain.splitlines(),
+            [
+                "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDQ=#Beta",
+                "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDM=#Alpha",
+            ],
+        )
+
+    def test_refresh_preserves_first_seen_node_order_when_upstream_reorders(self) -> None:
+        url = "https://ordered.example/sub"
+        payloads = {
+            url: base64.b64encode(
+                "\n".join(
+                    [
+                        "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDM=#Alpha",
+                        "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDQ=#Beta",
+                        "trojan://password@example.net:443?security=tls#Gamma",
+                    ]
+                ).encode("utf-8")
+            )
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = FakeSubscriptionManager(Path(temp_dir) / "panel.db", payloads)
+            manager.create_initial_user("admin", "password123")
+            subscription = manager.add_subscription("ordered", url)
+            profile = manager.add_profile(
+                name="Stable Node Order",
+                mode="selected",
+                subscription_ids=[subscription["id"]],
+            )
+
+            payloads[url] = base64.b64encode(
+                "\n".join(
+                    [
+                        "trojan://password@example.net:443?security=tls#Gamma",
+                        "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDM=#Alpha",
+                        "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDQ=#Beta",
+                    ]
+                ).encode("utf-8")
+            )
+
+            manager.refresh_subscription(subscription["id"], trigger="scheduler")
+            merged_plain = manager.build_merged_subscription(profile["id"], "plain")
+
+        self.assertEqual(
+            merged_plain.splitlines(),
+            [
+                "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDM=#Alpha",
+                "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDQ=#Beta",
+                "trojan://password@example.net:443?security=tls#Gamma",
+            ],
+        )
+
+    def test_refresh_appends_new_nodes_after_existing_stable_order(self) -> None:
+        url = "https://growing.example/sub"
+        payloads = {
+            url: base64.b64encode(
+                "\n".join(
+                    [
+                        "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDM=#Alpha",
+                        "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDQ=#Beta",
+                    ]
+                ).encode("utf-8")
+            )
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = FakeSubscriptionManager(Path(temp_dir) / "panel.db", payloads)
+            manager.create_initial_user("admin", "password123")
+            subscription = manager.add_subscription("growing", url)
+            profile = manager.add_profile(
+                name="Growing Order",
+                mode="selected",
+                subscription_ids=[subscription["id"]],
+            )
+
+            payloads[url] = base64.b64encode(
+                "\n".join(
+                    [
+                        "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDQ=#Beta",
+                        "trojan://password@example.net:443?security=tls#Gamma",
+                        "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDM=#Alpha",
+                    ]
+                ).encode("utf-8")
+            )
+
+            manager.refresh_subscription(subscription["id"], trigger="scheduler")
+            merged_plain = manager.build_merged_subscription(profile["id"], "plain")
+
+        self.assertEqual(
+            merged_plain.splitlines(),
+            [
+                "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDM=#Alpha",
+                "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDQ=#Beta",
+                "trojan://password@example.net:443?security=tls#Gamma",
+            ],
+        )
+    def test_all_mode_profile_keeps_remaining_order_when_source_is_disabled(self) -> None:
+        payloads = {
+            "https://one.example/sub": base64.b64encode(
+                "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDM=#One-A".encode("utf-8")
+            ),
+            "https://two.example/sub": base64.b64encode(
+                "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDQ=#Two-A".encode("utf-8")
+            ),
+            "https://three.example/sub": base64.b64encode(
+                "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDU=#Three-A".encode("utf-8")
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = FakeSubscriptionManager(Path(temp_dir) / "panel.db", payloads)
+            manager.create_initial_user("admin", "password123")
+            first = manager.add_subscription("one", "https://one.example/sub")
+            second = manager.add_subscription("two", "https://two.example/sub")
+            third = manager.add_subscription("three", "https://three.example/sub")
+            profile = manager.add_profile(
+                name="All Stable",
+                mode="all",
+                subscription_ids=[first["id"], second["id"], third["id"]],
+            )
+
+            manager.set_subscription_enabled(second["id"], False)
+            merged_plain = manager.build_merged_subscription(profile["id"], "plain")
+
+        self.assertEqual(
+            merged_plain.splitlines(),
+            [
+                "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDM=#One-A",
+                "ss://YWVzLTI1Ni1nY206cGFzc0BleGFtcGxlLmNvbTo0NDU=#Three-A",
+            ],
+        )
     def test_all_mode_profile_can_prioritize_sources(self) -> None:
         payloads = {
             "https://one.example/sub": base64.b64encode(
@@ -781,3 +997,6 @@ class ManagerFlowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
